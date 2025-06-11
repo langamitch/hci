@@ -180,7 +180,7 @@ Make sure to join on time and be ready to participate!</p>
 <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#fff"><path d="M240-200h133.85v-237.69h212.3V-200H720v-360L480-740.77 240-560v360Zm-60 60v-450l300-225.77L780-590v450H526.15v-237.69h-92.3V-140H180Zm300-330.38Z"/></svg>
         <span>Home</span>
       </a>
-      <a href="/check-in" class="nav-item">
+      <a  class="nav-item"  class="nav-item contact-button trigger-button" id="openPopup">
 <svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="#fff"><path d="M100-679.23V-860h180.77v60H160v120.77h-60ZM100-100v-180.77h60V-160h120.77v60H100Zm579.23 0v-60H800v-120.77h60V-100H679.23ZM800-679.23V-800H679.23v-60H860v180.77h-60ZM688.85-271.15h54.23v54.23h-54.23v-54.23Zm0-108.47h54.23v54.23h-54.23v-54.23Zm-54.24 54.23h54.24v54.24h-54.24v-54.24Zm-54.23 54.24h54.23v54.23h-54.23v-54.23Zm-54.23-54.24h54.23v54.24h-54.23v-54.24Zm108.46-108.46h54.24v54.23h-54.24v-54.23Zm-54.23 54.23h54.23v54.23h-54.23v-54.23Zm-54.23-54.23h54.23v54.23h-54.23v-54.23Zm216.93-309.23v216.93H526.15v-216.93h216.93ZM433.85-433.85v216.93H216.92v-216.93h216.93Zm0-309.23v216.93H216.92v-216.93h216.93Zm-47.7 478.46v-121.53H264.62v121.53h121.53Zm0-309.23v-121.53H264.62v121.53h121.53Zm309.23 0v-121.53H573.85v121.53h121.53Z"/></svg>
         <span>Check-in</span>
       </a>
@@ -189,6 +189,99 @@ Make sure to join on time and be ready to participate!</p>
         <span>Courses</span>
       </a>
     </nav>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-app.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/11.8.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAM4BVHqjFhE7IA4BXbXAgzyNaWLJQuy1A",
+            authDomain: "clothing-store-ea06f.firebaseapp.com",
+            projectId: "clothing-store-ea06f",
+            storageBucket: "clothing-store-ea06f.appspot.com",
+            messagingSenderId: "283493903260",
+            appId: "1:283493903260:web:63b83b2332d775f4173659",
+            measurementId: "G-ZDRVRMYWXJ"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const openPopupBtn = document.getElementById('openPopup');
+        const popupOverlay = document.getElementById('popupOverlay');
+        const submissionForm = document.getElementById('submissionForm');
+        const closePopupBtn = document.getElementById('closePopup');
+
+        openPopupBtn.addEventListener('click', () => {
+            popupOverlay.style.display = 'flex';
+        });
+
+        popupOverlay.addEventListener('click', (e) => {
+            if (e.target === popupOverlay) {
+                popupOverlay.style.display = 'none';
+            }
+        });
+
+        closePopupBtn.addEventListener('click', () => {
+            popupOverlay.style.display = 'none';
+        });
+
+        submissionForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = submissionForm.querySelector('.submit-btn');
+            const successMessage = document.getElementById('successMessage');
+            submitBtn.disabled = true;
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'Submitting Attendance...';
+
+            try {
+                const name = submissionForm.querySelector('input[placeholder*="Name"]').value;
+                const email = submissionForm.querySelector('input[type="email"]').value;
+                const pin = submissionForm.querySelector('input[type="pin"]').value;
+
+
+                const docRef = await addDoc(collection(db, "attendance"), {
+                    name,
+                    email,
+                    pin,
+                    status: "new",
+                    timestamp: Date.now()
+                });
+
+                // Hide form elements
+                submissionForm.querySelectorAll('.form-control').forEach(el => el.style.display = 'none');
+                submitBtn.style.display = 'none';
+                
+                // Show success message
+                successMessage.style.display = 'block';
+                successMessage.style.color = '#28a745';
+                successMessage.style.fontSize = '16px';
+                successMessage.style.margin = '15px 0';
+                successMessage.style.textAlign = 'center';
+                successMessage.style.fontWeight = '500';
+                successMessage.textContent = 'Thank you! Your issue has been submitted successfully. We will review it shortly.';
+                
+                setTimeout(() => {
+                    popupOverlay.style.display = 'none';
+                    submissionForm.reset();
+                    // Reset form display
+                    submissionForm.querySelectorAll('.form-control').forEach(el => el.style.display = 'block');
+                    submitBtn.style.display = 'block';
+                    successMessage.style.display = 'none';
+                    submitBtn.textContent = originalText;
+                    submitBtn.disabled = false;
+                }, 15000);
+            } catch (error) {
+                console.error('Error submitting form:', error);
+                alert('Error submitting form: ' + error.message);
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            }
+
+
+            
+        });
+    </script>
 
     <script>
       document.addEventListener("DOMContentLoaded", function () {
@@ -290,6 +383,41 @@ Make sure to join on time and be ready to participate!</p>
         });
       });
     </script>
+
+        <div class="popup-overlay" id="popupOverlay">
+        <button class="popup-close" id="closePopup" aria-label="Close popup">&times;</button>
+        <div class="popup">
+
+            <div class="popup-header">
+                <h2>Submit</h2>
+                <p>Sibmit attendance.</p>
+            </div>
+<form id="submissionForm">
+    <div class="form-control">
+        <input type="name" placeholder="Name, Organization, Business, etc" required>
+    </div>
+    <div class="form-control">
+        <input type="email" placeholder="Email address" required>
+    </div>
+    <div class="form-control">
+        <input type="pin" placeholder="XXXXXX" required>
+    </div>
+    <div class="form-control">
+        <input type="pin" placeholder="XXXXXX" required>
+    </div>
+    <div class="form-control">
+        <label for="qrScanner">Scan QR Code:</label>
+        <input type="file" accept="image/*" capture="environment" id="qrScanner">
+    </div>
+    <button type="submit" class="submit-btn">Submit Attendance</button>
+    <div class="success-message" id="successMessage"></div>
+</form>
+            <p style="font-size: 13px;
+            color: #888;
+            line-height: 1.5;
+            padding: 0 10px;" class="note">With this submission, I affirm my class attendance and accept that appropriate actions may be taken based on this record.</p>
+        </div>
+    </div>
 
     <script src="index.js"></script>
   </body>

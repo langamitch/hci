@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance: QR Code or PIN</title>
+    <script src="https://unpkg.com/qr-scanner@latest/qr-scanner.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        form {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 500px;
+        }
+        .form-control {
+            margin-bottom: 15px;
+        }
+        .form-control label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-control input[type="text"],
+        .form-control input[type="email"],
+        .form-control input[type="password"] { /* Changed PIN to password type for masking */
+            width: calc(100% - 20px);
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .form-control video {
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #000; /* To indicate video area */
+        }
+        button {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        #startScanner {
+            background-color: #007bff;
+            color: white;
+            margin-right: 10px;
+        }
+        .submit-btn {
+            background-color: #28a745;
+            color: white;
+        }
+        .message-box {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .success-message {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            display: none; /* Hidden by default */
+        }
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            display: none; /* Hidden by default */
+        }
+        .info-message {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+        #qrStatus, #locationStatus {
+            margin-top: 10px;
+            font-style: italic;
+            color: #555;
+            font-size: 0.9em;
+        }
+        .or-divider {
+            text-align: center;
+            margin: 20px 0;
+            font-weight: bold;
+            color: #666;
+            position: relative;
+        }
+        .or-divider::before, .or-divider::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 40%;
+            height: 1px;
+            background: #ddd;
+        }
+        .or-divider::before {
+            left: 0;
+        }
+        .or-divider::after {
+            right: 0;
+        }
+    </style>
+</head>
+<body>
+    <form id="submissionForm">
+        <div class="form-control">
+            <label for="name">Name, Organization, Business, etc</label>
+            <input type="text" id="name" placeholder="John Doe, Acme Corp" required>
+        </div>
+        <div class="form-control">
+            <label for="email">Email address</label>
+            <input type="email" id="email" placeholder="email@example.com" required>
+        </div>
+
+        <div class="form-control">
+            <label for="pinInput">Enter PIN:</label>
+            <input type="password" id="pinInput" placeholder="Enter your 6-digit PIN" maxlength="6">
+            <p class="info-message">Enter PIN if QR code scanning is not available or preferred.</p>
+        </div>
+
+        <div class="or-divider">OR</div>
+
+        <div class="form-control">
+            <label for="qrVideo">Scan QR Code:</label>
+            <video id="qrVideo" style="width:100%; display:none;" autoplay></video>
+            <input type="hidden" id="qrCodeValue" name="qrCodeValue">
+            <p id="qrStatus">No QR code scanned yet. Click "Request Camera Access" to start.</p>
+        </div>
+        <button type="button" id="startScanner">Request Camera Access</button>
+
+        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+
+        <div class="form-control">
+            <label>Location Check:</label>
+            <p id="locationStatus">Attempting to detect your location...</p>
+            <input type="hidden" id="currentLat" name="currentLat">
+            <input type="hidden" id="currentLon" name="currentLon">
+        </div>
+        <button type="submit" class="submit-btn">Submit Attendance</button>
+
+        <div class="message-box success-message" id="successMessage"></div>
+        <div class="message-box error-message" id="errorMessage"></div>
+    </form>
+
+<script>
+    // Constants and DOM elements (these remain the same as previous versions)
+    const videoElement = document.getElementById("qrVideo");
+    const startScannerButton = document.getElementById("startScanner");
+    const qrCodeValueInput = document.getElementById("qrCodeValue");
+    const qrStatusText = document.getElementById("qrStatus");
+    const pinInput = document.getElementById("pinInput");
+    const submissionForm = document.getElementById("submissionForm");
+    const successMessage = document.getElementById("successMessage");
+    const errorMessage = document.getElementById("errorMessage");
+    const locationStatusText = document.getElementById("locationStatus");
+    const currentLatInput = document.getElementById("currentLat");
+    const currentLonInput = document.getElementById("currentLon");
+
+    let qrScanner = null;
+    let currentLatitude = null;
+    let currentLongitude = null;
+    let locationObtained = false; // Flag to track if location was successfully obtained
+
+    // CRITICAL: Replace with the actual location of the device displaying the QR code/PIN
+    // These are example coordinates for East London, South Africa.
+    // In a real system, these would likely come from a server or be configured dynamically.
+    const FIXED_QR_PIN_LOCATION = {
+        latitude: -33.0069, // Example: East London Airport (replace with your exact spot)
+        longitude: 27.8285,
+    };
+    const PROXIMITY_RADIUS_METERS = 5; // The desired radius for location check
+
+    // --- Geolocation Functions ---
+    function getCurrentLocation() {
+        locationStatusText.textContent = "Detecting your location...";
+        errorMessage.style.display = 'none';
+
+        if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    currentLatitude = position.coords.latitude;
+                    currentLongitude = position.coords.longitude;
+                    currentLatInput.value = currentLatitude;
+                    currentLonInput.value = currentLongitude;
+                    locationObtained = true; // Set flag to true
+
+                    const distance = calculateDistance(
+                        currentLatitude,
+                        currentLongitude,
+                        FIXED_QR_PIN_LOCATION.latitude,
+                        FIXED_QR_PIN_LOCATION.longitude
+                    );
+
+                    locationStatusText.textContent = `Location detected. Distance to attendance point: ${distance.toFixed(2)} meters.`;
+                },
+                (error) => {
+                    locationObtained = false; // Set flag to false on error
+                    currentLatitude = null;
+                    currentLongitude = null;
+                    currentLatInput.value = '';
+                    currentLonInput.value = '';
+
+                    let errorMsg = "Could not detect your location.";
+                    switch (error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMsg += " **Please enable location services for this site in your browser settings (e.g., Safari/Chrome Site Settings), and ensure location access is allowed for your browser in your device's Privacy & Security settings.**";
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMsg += " Location information is unavailable. Check your device's GPS/Wi-Fi.";
+                            break;
+                        case error.TIMEOUT:
+                            errorMsg += " Timed out while trying to get your location.";
+                            break;
+                        case error.UNKNOWN_ERROR:
+                            errorMsg += " An unknown error occurred during location detection.";
+                            break;
+                    }
+                    locationStatusText.textContent = `Location Error: ${errorMsg}`;
+                    showErrorMessage(errorMsg);
+                },
+                {
+                    enableHighAccuracy: true, // Request more accurate location
+                    timeout: 10000,           // 10 seconds timeout
+                    maximumAge: 0             // Don't use cached location
+                }
+            );
+        } else {
+            locationStatusText.textContent = "Geolocation is not supported by your browser.";
+            showErrorMessage("Geolocation is not supported by your browser. Please use a modern browser.");
+        }
+    }
+
+    // Haversine formula to calculate distance between two lat/lon points
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371e3; // metres
+        const φ1 = lat1 * Math.PI / 180; // φ, λ in radians
+        const φ2 = lat2 * Math.PI / 180;
+        const Δφ = (lat2 - lat1) * Math.PI / 180;
+        const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        const d = R * c; // in metres
+        return d;
+    }
+
+    // --- QR Scanner Functions ---
+    async function startQRScanner() {
+        if (qrScanner) {
+            qrScanner.stop();
+            qrScanner.destroy();
+            qrScanner = null;
+        }
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+            videoElement.srcObject = stream;
+            videoElement.style.display = 'block';
+
+            qrScanner = new QrScanner(
+                videoElement,
+                result => {
+                    console.log('Scanned QR Code:', result.data);
+                    qrCodeValueInput.value = result.data;
+                    qrStatusText.textContent = `QR Code Scanned: ${result.data.substring(0, 30)}... (Value Saved)`;
+                    pinInput.value = ''; // Clear PIN field if QR is scanned
+                    pinInput.disabled = true; // Disable PIN input
+                    qrScanner.stop();
+                    qrScanner.destroy();
+                    qrScanner = null;
+                    startScannerButton.style.display = 'none'; // Hide scanner button
+                    videoElement.style.display = 'none'; // Hide video element
+                },
+                {
+                    highlightScanRegion: true,
+                    highlightCodeOutline: true,
+                }
+            );
+
+            await qrScanner.start();
+            startScannerButton.textContent = "Scanning...";
+            startScannerButton.disabled = true;
+            qrStatusText.textContent = "Scanning for QR code...";
+            errorMessage.style.display = 'none'; // Hide any previous error
+        } catch (error) {
+            console.error("Error accessing camera: ", error);
+            const errorMsg = "Camera access denied or unavailable. Please ensure your browser and device have camera permissions.";
+            qrStatusText.textContent = `QR Error: ${errorMsg}`;
+            showErrorMessage(errorMsg);
+            videoElement.srcObject = null;
+            videoElement.style.display = 'none';
+            startScannerButton.disabled = false;
+            startScannerButton.textContent = "Request Camera Access";
+        }
+    }
+
+    // --- Message Display Functions ---
+    function showSuccessMessage(message) {
+        successMessage.textContent = message;
+        successMessage.style.display = "block";
+        errorMessage.style.display = "none";
+        setTimeout(() => { successMessage.style.display = "none"; }, 5000);
+    }
+
+    function showErrorMessage(message) {
+        errorMessage.textContent = message;
+        errorMessage.style.display = "block";
+        successMessage.style.display = "none";
+    }
+
+    // --- Event Listeners ---
+    startScannerButton.addEventListener("click", startQRScanner);
+
+    // When PIN input changes, enable QR scanning and clear QR value if PIN has value
+    pinInput.addEventListener('input', () => {
+        if (pinInput.value.trim() !== '') {
+            qrCodeValueInput.value = ''; // Clear QR value
+            qrStatusText.textContent = "Using PIN instead of QR. Click 'Request Camera Access' to scan QR.";
+            startScannerButton.style.display = 'inline-block'; // Show scanner button
+            startScannerButton.disabled = false;
+            videoElement.style.display = 'none'; // Hide video
+            if (qrScanner) { // Stop scanner if running
+                qrScanner.stop();
+                qrScanner.destroy();
+                qrScanner = null;
+            }
+        } else {
+             qrStatusText.textContent = "No QR code scanned yet. Click 'Request Camera Access' to start.";
+             // If PIN is cleared, re-enable QR scanning potential
+             startScannerButton.style.display = 'inline-block';
+             startScannerButton.disabled = false;
+        }
+    });
+
+    // --- Form Submission Handler ---
+    submissionForm.addEventListener("submit", function (event) {
+        event.preventDefault(); // Prevent default form submit
+        errorMessage.style.display = 'none';
+        successMessage.style.display = 'none';
+
+        const name = document.getElementById("name").value.trim();
+        const email = document.getElementById("email").value.trim();
+        const pin = pinInput.value.trim();
+        const qrCode = qrCodeValueInput.value.trim();
+
+        // Basic validation
+        if (!name || !email) {
+            showErrorMessage("Please enter both your name and email.");
+            return;
+        }
+
+        // Check if either PIN or QR code is entered
+        if (!pin && !qrCode) {
+            showErrorMessage("Please enter a PIN or scan a QR code.");
+            return;
+        }
+
+        // --- NEW: Check if BOTH PIN and QR are entered (if that's not allowed) ---
+        if (pin && qrCode) {
+            showErrorMessage("Please use EITHER a PIN OR scan a QR code, not both.");
+            return;
+        }
+        // --- END NEW ---
+
+        // Determine the method and value used for submission
+        const chosenMethod = pin ? "PIN" : "QR Code";
+        const authenticationValue = pin || qrCode;
+
+        // Check if location was obtained
+        if (!locationObtained) {
+            showErrorMessage("Location not detected. Please ensure location services are enabled for this site and try again.");
+            getCurrentLocation(); // Attempt to get location again
+            return;
+        }
+
+        // Check if user is within allowed proximity
+        const distance = calculateDistance(
+            currentLatitude,
+            currentLongitude,
+            FIXED_QR_PIN_LOCATION.latitude,
+            FIXED_QR_PIN_LOCATION.longitude
+        );
+
+        if (distance > PROXIMITY_RADIUS_METERS) {
+            showErrorMessage(`You are too far from the attendance point. Distance: ${distance.toFixed(2)} meters (Allowed: ${PROXIMITY_RADIUS_METERS} m)`);
+            return;
+        }
+
+        // Final success
+        showSuccessMessage("✅ Attendance submitted successfully!");
+
+        // Optional: You can now send data to a backend or Firebase
+        // Example:
+        const attendanceData = {
+            name: name,
+            email: email,
+            authenticationMethod: chosenMethod,
+            authenticationValue: authenticationValue, // This would be the PIN or QR code data
+            location: {
+                lat: currentLatitude,
+                lon: currentLongitude
+            },
+            distanceToPoint: distance.toFixed(2),
+            timestamp: new Date().toISOString()
+        };
+        console.log("Attendance Data to Send:", attendanceData);
+        // In a real application, you would use fetch() here to send to your server:
+        /*
+        fetch('/api/submit-attendance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(attendanceData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showSuccessMessage("✅ Attendance submitted successfully!");
+            } else {
+                showErrorMessage(data.message || "Attendance submission failed.");
+            }
+        })
+        .catch(error => {
+            console.error('Error submitting attendance:', error);
+            showErrorMessage("Network error during submission. Please try again.");
+        });
+        */
+
+        // Reset form fields and UI state after successful submission (for demo)
+        submissionForm.reset();
+        qrCodeValueInput.value = '';
+        pinInput.disabled = false;
+        startScannerButton.style.display = 'inline-block';
+        startScannerButton.disabled = false;
+        startScannerButton.textContent = "Request Camera Access";
+        videoElement.style.display = 'none';
+        // Reset location status for the next entry
+        currentLatitude = null;
+        currentLongitude = null;
+        locationObtained = false;
+        locationStatusText.textContent = "Attempting to detect your location...";
+        getCurrentLocation(); // Re-initiate location detection for the next submission
+    });
+
+    // --- Initial setup on page load ---
+    videoElement.style.display = 'none'; // Hide video until camera access is requested
+    window.addEventListener("load", getCurrentLocation); // Automatically trigger location detection
+</script>
+</body>
+</html>
