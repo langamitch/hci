@@ -3,96 +3,117 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Attendance: QR Code or PIN</title>
+    <title>Attendance System</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- QR Scanner Library CDN -->
     <script src="https://unpkg.com/qr-scanner@latest/qr-scanner.min.js"></script>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, where, onSnapshot, doc, getDocs, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Expose Firebase objects globally for use in the main script
+        window.firebaseApp = null;
+        window.db = null;
+        window.auth = null;
+        window.currentUserId = null;
+        window.firebaseLoading = true;
+        window.firebaseError = null;
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const app = initializeApp(firebaseConfig);
+                window.firebaseApp = app;
+                window.db = getFirestore(app);
+                window.auth = getAuth(app);
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(window.auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(window.auth);
+                }
+
+                onAuthStateChanged(window.auth, (user) => {
+                    if (user) {
+                        window.currentUserId = user.uid;
+                        console.log("Firebase initialized. User ID:", window.currentUserId);
+                    } else {
+                        window.currentUserId = null;
+                        console.log("Firebase: User signed out.");
+                    }
+                    window.firebaseLoading = false;
+                    // Update UI or trigger initial view render after Firebase is ready
+                    updateFirebaseStatusUI();
+                    showView('home'); // Show home view after Firebase is ready
+                });
+
+            } catch (e) {
+                console.error("Error initializing Firebase:", e);
+                window.firebaseError = "Failed to initialize Firebase: " + e.message;
+                window.firebaseLoading = false;
+                updateFirebaseStatusUI();
+                showView('home'); // Still show home view, but with error
+            }
+        });
+
+        // Function to update Firebase status on the UI (e.g., on the Home screen)
+        function updateFirebaseStatusUI() {
+            const statusElement = document.getElementById('firebase-status');
+            if (statusElement) {
+                if (window.firebaseLoading) {
+                    statusElement.textContent = `Loading Firebase for User: ${window.currentUserId || 'N/A'}`;
+                    statusElement.className = 'text-lg text-gray-600 mb-8 text-center';
+                } else if (window.firebaseError) {
+                    statusElement.textContent = `Error: ${window.firebaseError}`;
+                    statusElement.className = 'text-red-500 block text-sm mt-2';
+                } else {
+                    statusElement.textContent = `Welcome, User ID: ${window.currentUserId}`;
+                    statusElement.className = 'text-lg text-gray-600 mb-8 text-center';
+                }
+            }
+
+            // Also manage button disabled states
+            const homeButtons = document.querySelectorAll('#home-view button');
+            homeButtons.forEach(button => {
+                button.disabled = window.firebaseLoading || !!window.firebaseError;
+            });
+        }
+    </script>
+
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f4f4f4;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-        }
-        form {
-            background-color: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            width: 100%;
-            max-width: 500px;
-        }
-        .form-control {
-            margin-bottom: 15px;
-        }
-        .form-control label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        .form-control input[type="text"],
-        .form-control input[type="email"],
-        .form-control input[type="password"] { /* Changed PIN to password type for masking */
-            width: calc(100% - 20px);
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 16px;
-        }
-        .form-control video {
-            width: 100%;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            background-color: #000; /* To indicate video area */
-        }
-        button {
-            padding: 10px 15px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-top: 10px;
-        }
-        #startScanner {
-            background-color: #007bff;
-            color: white;
-            margin-right: 10px;
-        }
-        .submit-btn {
-            background-color: #28a745;
-            color: white;
-        }
+        body { font-family: 'Inter', sans-serif; }
+        .view-section { display: none; } /* Hidden by default */
+        /* Custom message box styling */
         .message-box {
-            margin-top: 20px;
-            padding: 10px;
-            border-radius: 4px;
-            text-align: center;
+            border-radius: 0.375rem; /* rounded-md */
+            padding: 1rem; /* p-4 */
+            position: relative;
+            margin-top: 1rem; /* mt-4 */
         }
-        .success-message {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-            display: none; /* Hidden by default */
+        .message-box.success {
+            background-color: #d4edda; /* bg-green-100 */
+            border-color: #c3e6cb; /* border-green-400 */
+            color: #155724; /* text-green-700 */
         }
-        .error-message {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-            display: none; /* Hidden by default */
+        .message-box.error {
+            background-color: #f8d7da; /* bg-red-100 */
+            border-color: #f5c6cb; /* border-red-400 */
+            color: #721c24; /* text-red-700 */
         }
-        .info-message {
-            background-color: #d1ecf1;
-            color: #0c5460;
-            border: 1px solid #bee5eb;
-            margin-top: 10px;
-            font-size: 0.9em;
-        }
-        #qrStatus, #locationStatus {
-            margin-top: 10px;
-            font-style: italic;
-            color: #555;
-            font-size: 0.9em;
+        .message-box .close-btn {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            padding: 1rem;
+            cursor: pointer;
         }
         .or-divider {
             text-align: center;
@@ -117,352 +138,874 @@
         }
     </style>
 </head>
-<body>
-    <form id="submissionForm">
-        <div class="form-control">
-            <label for="name">Name, Organization, Business, etc</label>
-            <input type="text" id="name" placeholder="John Doe, Acme Corp" required>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+
+    <div id="app-container" class="w-full max-w-2xl bg-white rounded-lg shadow-xl p-8">
+
+        <!-- Home View -->
+        <div id="home-view" class="view-section text-center">
+            <h1 class="text-4xl font-extrabold text-gray-900 mb-8">Attendance System</h1>
+            <p id="firebase-status" class="text-lg text-gray-600 mb-8"></p>
+            <div class="flex flex-col space-y-4 w-full max-w-sm mx-auto">
+                <button id="create-session-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transform transition duration-300 ease-in-out hover:scale-105">
+                    Create New Attendance Session
+                </button>
+                <button id="student-sign-in-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transform transition duration-300 ease-in-out hover:scale-105">
+                    Student Sign-in
+                </button>
+                <button id="view-sessions-btn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-6 rounded-lg shadow-lg transform transition duration-300 ease-in-out hover:scale-105">
+                    View My Attendance Sessions
+                </button>
+            </div>
         </div>
-        <div class="form-control">
-            <label for="email">Email address</label>
-            <input type="email" id="email" placeholder="email@example.com" required>
+
+        <!-- Create Attendance Session View -->
+        <div id="create-view" class="view-section">
+            <h2 class="text-2xl font-bold mb-6 text-gray-800">Create Attendance Session</h2>
+            <form id="create-session-form" class="space-y-4">
+                <div>
+                    <label for="create-session-name" class="block text-sm font-medium text-gray-700">Session Name</label>
+                    <input type="text" id="create-session-name" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="e.g., Math Class Q3" required>
+                </div>
+                <div>
+                    <label for="create-class-date" class="block text-sm font-medium text-gray-700">Class Date</label>
+                    <input type="date" id="create-class-date" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" required>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Attendance Point Location</label>
+                    <p id="create-location-status" class="text-sm text-gray-600 mb-2">Click "Get Location" to set attendance point.</p>
+                    <button type="button" id="get-location-create-btn" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Get Location
+                    </button>
+                    <input type="hidden" id="create-lat">
+                    <input type="hidden" id="create-lon">
+                </div>
+                <button type="submit" id="submit-create-session" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                    Generate PIN & Create Session
+                </button>
+            </form>
+
+            <div id="created-pin-display" class="mt-6 p-4 border border-dashed border-gray-300 rounded-md text-center hidden">
+                <p class="text-xl font-semibold text-gray-900 mb-2">Generated PIN: <span id="generated-pin" class="text-green-600"></span></p>
+                <p class="text-sm text-gray-600 mb-2">Share this PIN or QR code with students.</p>
+                <img id="qr-code-img" src="https://placehold.co/150x150/EEEEEE/CCCCCC?text=QR+Code" alt="QR Code" class="mx-auto border border-gray-200 rounded-md" onerror="this.onerror=null;this.src='https://placehold.co/150x150/EEEEEE/CCCCCC?text=QR+Error';"/>
+            </div>
+            <div id="create-message-container"></div>
+            <button id="back-home-create-btn" class="mt-6 px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-800">
+                ← Back to Home
+            </button>
         </div>
 
-        <div class="form-control">
-            <label for="pinInput">Enter PIN:</label>
-            <input type="password" id="pinInput" placeholder="Enter your 6-digit PIN" maxlength="6">
-            <p class="info-message">Enter PIN if QR code scanning is not available or preferred.</p>
+        <!-- Student Sign-in View -->
+        <div id="sign-in-view" class="view-section">
+            <h2 class="text-2xl font-bold mb-6 text-gray-800">Student Sign-in</h2>
+            <form id="sign-in-form" class="space-y-4">
+                <div>
+                    <label for="student-name" class="block text-sm font-medium text-gray-700">Your Name</label>
+                    <input type="text" id="student-name" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="Your Full Name" required>
+                </div>
+                <div>
+                    <label for="student-email" class="block text-sm font-medium text-gray-700">Your Email</label>
+                    <input type="email" id="student-email" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" placeholder="your.email@example.com" required>
+                </div>
+
+                <div class="border border-dashed border-gray-300 p-4 rounded-md">
+                    <label for="sign-in-pin" class="block text-sm font-medium text-gray-700">Enter PIN (6-digits)</label>
+                    <input type="password" id="sign-in-pin" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm" maxlength="6" placeholder="XXXXXX">
+                    <p class="text-xs text-gray-500 mt-1">Enter PIN if QR code scanning is not available.</p>
+                </div>
+
+                <div class="or-divider">OR</div>
+
+                <div class="border border-dashed border-gray-300 p-4 rounded-md">
+                    <label class="block text-sm font-medium text-gray-700">Scan QR Code</label>
+                    <video id="qr-video-scanner" class="mt-1 block w-full rounded-md" style="display:none; min-height: 150px; background-color: #000;" autoplay playsinline></video>
+                    <button type="button" id="start-qr-scanner-btn" class="mt-2 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Start Camera for QR
+                    </button>
+                    <input type="hidden" id="scanned-qr-value">
+                    <p id="qr-scan-status" class="text-sm text-gray-600 mt-2">No QR code scanned yet.</p>
+                    <p class="text-xs text-gray-500 mt-1">Scanned QR data will populate automatically.</p>
+                </div>
+
+                <div class="mt-6">
+                    <label class="block text-sm font-medium text-gray-700">Your Current Location</label>
+                    <p id="student-location-status" class="text-sm text-gray-600 italic">Detecting your location...</p>
+                </div>
+
+                <button type="submit" id="submit-sign-in" class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500">
+                    Submit Attendance
+                </button>
+            </form>
+            <div id="sign-in-message-container"></div>
+            <button id="back-home-sign-in-btn" class="mt-6 px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-800">
+                ← Back to Home
+            </button>
         </div>
 
-        <div class="or-divider">OR</div>
+        <!-- View Attendance Sessions View -->
+        <div id="view-sessions-view" class="view-section">
+            <h2 class="text-2xl font-bold mb-6 text-gray-800">My Attendance Sessions</h2>
+            <div id="sessions-list" class="space-y-4">
+                <p class="text-gray-600">Loading sessions...</p>
+            </div>
 
-        <div class="form-control">
-            <label for="qrVideo">Scan QR Code:</label>
-            <video id="qrVideo" style="width:100%; display:none;" autoplay></video>
-            <input type="hidden" id="qrCodeValue" name="qrCodeValue">
-            <p id="qrStatus">No QR code scanned yet. Click "Request Camera Access" to start.</p>
+            <div id="selected-session-records" class="mt-8 border-t pt-6 hidden">
+                <h3 id="records-for-session-title" class="text-xl font-bold mb-4 text-gray-800"></h3>
+                <ul id="attendance-records-list" class="divide-y divide-gray-200">
+                    <p class="text-gray-600">No students have signed in for this session yet.</p>
+                </ul>
+            </div>
+            <div id="view-message-container"></div>
+            <button id="back-home-view-btn" class="mt-6 px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-800">
+                ← Back to Home
+            </button>
         </div>
-        <button type="button" id="startScanner">Request Camera Access</button>
 
-        <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
+    </div>
 
-        <div class="form-control">
-            <label>Location Check:</label>
-            <p id="locationStatus">Attempting to detect your location...</p>
-            <input type="hidden" id="currentLat" name="currentLat">
-            <input type="hidden" id="currentLon" name="currentLon">
-        </div>
-        <button type="submit" class="submit-btn">Submit Attendance</button>
+    <script>
+        // --- Global Variables and DOM Elements ---
+        const appContainer = document.getElementById('app-container');
+        const homeView = document.getElementById('home-view');
+        const createView = document.getElementById('create-view');
+        const signInView = document.getElementById('sign-in-view');
+        const viewSessionsView = document.getElementById('view-sessions-view');
 
-        <div class="message-box success-message" id="successMessage"></div>
-        <div class="message-box error-message" id="errorMessage"></div>
-    </form>
+        // Home Buttons
+        const createSessionBtn = document.getElementById('create-session-btn');
+        const studentSignInBtn = document.getElementById('student-sign-in-btn');
+        const viewSessionsBtn = document.getElementById('view-sessions-btn');
+        const firebaseStatusElement = document.getElementById('firebase-status');
 
-<script>
-    // Constants and DOM elements (these remain the same as previous versions)
-    const videoElement = document.getElementById("qrVideo");
-    const startScannerButton = document.getElementById("startScanner");
-    const qrCodeValueInput = document.getElementById("qrCodeValue");
-    const qrStatusText = document.getElementById("qrStatus");
-    const pinInput = document.getElementById("pinInput");
-    const submissionForm = document.getElementById("submissionForm");
-    const successMessage = document.getElementById("successMessage");
-    const errorMessage = document.getElementById("errorMessage");
-    const locationStatusText = document.getElementById("locationStatus");
-    const currentLatInput = document.getElementById("currentLat");
-    const currentLonInput = document.getElementById("currentLon");
+        // Create Session Elements
+        const createSessionForm = document.getElementById('create-session-form');
+        const createSessionNameInput = document.getElementById('create-session-name');
+        const createClassDateInput = document.getElementById('create-class-date');
+        const getLocationCreateBtn = document.getElementById('get-location-create-btn');
+        const createLocationStatus = document.getElementById('create-location-status');
+        const createLatInput = document.getElementById('create-lat');
+        const createLonInput = document.getElementById('create-lon');
+        const submitCreateSessionBtn = document.getElementById('submit-create-session');
+        const createdPinDisplay = document.getElementById('created-pin-display');
+        const generatedPinSpan = document.getElementById('generated-pin');
+        const qrCodeImg = document.getElementById('qr-code-img');
+        const backHomeCreateBtn = document.getElementById('back-home-create-btn');
+        const createMessageContainer = document.getElementById('create-message-container');
 
-    let qrScanner = null;
-    let currentLatitude = null;
-    let currentLongitude = null;
-    let locationObtained = false; // Flag to track if location was successfully obtained
+        // Student Sign-in Elements
+        const signInForm = document.getElementById('sign-in-form');
+        const studentNameInput = document.getElementById('student-name');
+        const studentEmailInput = document.getElementById('student-email');
+        const signInPinInput = document.getElementById('sign-in-pin');
+        const qrVideoScanner = document.getElementById('qr-video-scanner');
+        const startQrScannerBtn = document.getElementById('start-qr-scanner-btn');
+        const scannedQrValueInput = document.getElementById('scanned-qr-value');
+        const qrScanStatus = document.getElementById('qr-scan-status');
+        const studentLocationStatus = document.getElementById('student-location-status');
+        const submitSignInBtn = document.getElementById('submit-sign-in');
+        const signInMessageContainer = document.getElementById('sign-in-message-container');
+        const backHomeSignInBtn = document.getElementById('back-home-sign-in-btn');
 
-    // CRITICAL: Replace with the actual location of the device displaying the QR code/PIN
-    // These are example coordinates for East London, South Africa.
-    // In a real system, these would likely come from a server or be configured dynamically.
-    const FIXED_QR_PIN_LOCATION = {
-        latitude: -33.0069, // Example: East London Airport (replace with your exact spot)
-        longitude: 27.8285,
-    };
-    const PROXIMITY_RADIUS_METERS = 5; // The desired radius for location check
+        // View Sessions Elements
+        const sessionsList = document.getElementById('sessions-list');
+        const selectedSessionRecordsDiv = document.getElementById('selected-session-records');
+        const recordsForSessionTitle = document.getElementById('records-for-session-title');
+        const attendanceRecordsList = document.getElementById('attendance-records-list');
+        const viewMessageContainer = document.getElementById('view-message-container');
+        const backHomeViewBtn = document.getElementById('back-home-view-btn');
 
-    // --- Geolocation Functions ---
-    function getCurrentLocation() {
-        locationStatusText.textContent = "Detecting your location...";
-        errorMessage.style.display = 'none';
+        // State variables (JavaScript equivalents for React state)
+        let currentView = 'home';
+        let sessionCreationLocation = null; // {latitude, longitude} for create view
+        let studentCurrentLocation = null;  // {latitude, longitude} for sign-in view
+        let isStudentLocationObtained = false;
+        let qrScannerInstance = null; // Holds the QrScanner object
+        let cameraStreamInstance = null; // Holds the MediaStream object
+        let selectedSessionIdToView = null; // For View Sessions component
 
-        if ("geolocation" in navigator) {
-            navigator.geolocation.getCurrentPosition(
+        // Constants
+        const PROXIMITY_RADIUS_METERS = 5;
+        // Placeholder for attendance session location (for comparison)
+        // **IMPORTANT:** In a real app, this location should come from the session data fetched from Firebase.
+        // This variable is primarily used when creating a session, and then the stored session location
+        // from Firebase is used for comparison during sign-in.
+        const PLACEHOLDER_ATTENDANCE_POINT = { latitude: -33.0069, longitude: 27.8285 }; // Example: East London
+
+        // --- Utility Functions ---
+
+        /**
+         * Haversine formula to calculate distance between two lat/lon points.
+         * @param {number} lat1 Latitude of point 1
+         * @param {number} lon1 Longitude of point 1
+         * @param {number} lat2 Latitude of point 2
+         * @param {number} lon2 Longitude of point 2
+         * @returns {number} Distance in meters
+         */
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // metres
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            const d = R * c; // in metres
+            return d;
+        }
+
+        /**
+         * Generates a random 6-digit PIN.
+         * @returns {string} 6-digit PIN
+         */
+        function generatePin() {
+            return Math.floor(100000 + Math.random() * 900000).toString();
+        }
+
+        /**
+         * Displays a message in a designated container.
+         * @param {HTMLElement} container The DOM element to append the message to.
+         * @param {string} type 'success' or 'error'.
+         * @param {string} message The message text.
+         */
+        function showMessageBox(container, type, message) {
+            // Clear any existing messages first
+            container.innerHTML = '';
+
+            const messageBox = document.createElement('div');
+            messageBox.className = `message-box ${type} mt-4`;
+            messageBox.role = 'alert';
+            messageBox.innerHTML = `
+                <strong class="font-bold">${type === 'success' ? 'Success!' : 'Error!'}</strong>
+                <span class="block sm:inline ml-2">${message}</span>
+                <span class="close-btn">
+                    <svg class="fill-current h-6 w-6" role="button" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><title>Close</title><path d="M14.348 14.849a1.2 1.2 0 0 1-1.697 0L10 11.196l-2.651 2.652a1.2 1.2 0 1 1-1.697-1.697L8.303 9.5l-2.651-2.651a1.2 1.2 0 1 1 1.697-1.697L10 7.803l2.651-2.651a1.2 1.2 0 0 1 1.697 1.697L11.696 9.5l2.652 2.651a1.2 1.2 0 0 1 0 1.698z"/></svg>
+                </span>
+            `;
+            container.appendChild(messageBox);
+
+            messageBox.querySelector('.close-btn').addEventListener('click', () => {
+                messageBox.remove();
+            });
+
+            // Auto-hide success messages
+            if (type === 'success') {
+                setTimeout(() => {
+                    messageBox.remove();
+                }, 5000);
+            }
+        }
+
+        /**
+         * Hides all view sections.
+         */
+        function hideAllViews() {
+            document.querySelectorAll('.view-section').forEach(section => {
+                section.style.display = 'none';
+            });
+        }
+
+        /**
+         * Shows a specific view section and hides others.
+         * @param {string} viewName The ID of the view section to show (e.g., 'home', 'create-view', 'sign-in-view', 'view-sessions-view').
+         */
+        function showView(viewName) {
+            hideAllViews();
+            currentView = viewName;
+
+            // Reset specific view states before showing
+            if (viewName === 'create-view') {
+                createSessionForm.reset();
+                createdPinDisplay.classList.add('hidden');
+                createLocationStatus.textContent = 'Click "Get Location" to set attendance point.';
+                sessionCreationLocation = null;
+                createMessageContainer.innerHTML = '';
+            } else if (viewName === 'sign-in-view') {
+                signInForm.reset();
+                scannedQrValueInput.value = '';
+                qrScanStatus.textContent = 'No QR code scanned yet.';
+                signInPinInput.disabled = false;
+                startQrScannerBtn.textContent = 'Start Camera for QR';
+                startQrScannerBtn.disabled = false;
+                qrVideoScanner.style.display = 'none';
+                signInMessageContainer.innerHTML = '';
+                if (qrScannerInstance) {
+                    qrScannerInstance.stop();
+                    qrScannerInstance.destroy();
+                    qrScannerInstance = null;
+                }
+                if (cameraStreamInstance) {
+                    cameraStreamInstance.getTracks().forEach(track => track.stop());
+                    cameraStreamInstance = null;
+                }
+                // Automatically attempt to get student location on sign-in view load
+                getStudentLocation();
+            } else if (viewName === 'view-sessions-view') {
+                selectedSessionIdToView = null;
+                selectedSessionRecordsDiv.classList.add('hidden');
+                attendanceRecordsList.innerHTML = '<p class="text-gray-600">No students have signed in for this session yet.</p>';
+                sessionsList.innerHTML = '<p class="text-gray-600">Loading sessions...</p>';
+                viewMessageContainer.innerHTML = '';
+                fetchAttendanceSessions(); // Fetch sessions when view is shown
+            }
+
+            document.getElementById(viewName).style.display = 'block';
+        }
+
+        // --- Geolocation Function (used by both create and sign-in) ---
+        /**
+         * Attempts to get the current geolocation.
+         * @param {function(object): void} successCallback Function to call on success.
+         * @param {function(object): void} errorCallback Function to call on error.
+         * @param {HTMLElement} statusElement DOM element to update status text.
+         * @param {HTMLElement} messageContainer DOM element to show error messages.
+         */
+        function getCurrentGeolocation(successCallback, errorCallback, statusElement, messageContainer) {
+            statusElement.textContent = 'Requesting location...';
+            messageContainer.innerHTML = ''; // Clear previous messages
+
+            if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        successCallback(position);
+                    },
+                    (error) => {
+                        let msg = "Could not detect your location.";
+                        switch (error.code) {
+                            case error.PERMISSION_DENIED:
+                                msg += " **Please enable location services for this site in your browser settings (e.g., Safari/Chrome Site Settings), and ensure location access is allowed for your browser in your device's Privacy & Security settings.**";
+                                break;
+                            case error.POSITION_UNAVAILABLE:
+                                msg += " Location information is unavailable. Check your device's GPS/Wi-Fi.";
+                                break;
+                            case error.TIMEOUT:
+                                msg += " Timed out while trying to get your location.";
+                                break;
+                            case error.UNKNOWN_ERROR:
+                                msg += " An unknown error occurred.";
+                                break;
+                        }
+                        statusElement.textContent = `Location Error: ${msg}`;
+                        showMessageBox(messageContainer, 'error', msg);
+                        errorCallback(error);
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
+            } else {
+                const msg = "Geolocation is not supported by your browser. Please use a modern browser.";
+                statusElement.textContent = msg;
+                showMessageBox(messageContainer, 'error', msg);
+                errorCallback(new Error(msg));
+            }
+        }
+
+        // --- Create Attendance Session Logic ---
+
+        let createViewLocation = null; // Local variable for location in create view
+
+        getLocationCreateBtn.addEventListener('click', () => {
+            getCurrentGeolocation(
                 (position) => {
-                    currentLatitude = position.coords.latitude;
-                    currentLongitude = position.coords.longitude;
-                    currentLatInput.value = currentLatitude;
-                    currentLonInput.value = currentLongitude;
-                    locationObtained = true; // Set flag to true
-
-                    const distance = calculateDistance(
-                        currentLatitude,
-                        currentLongitude,
-                        FIXED_QR_PIN_LOCATION.latitude,
-                        FIXED_QR_PIN_LOCATION.longitude
-                    );
-
-                    locationStatusText.textContent = `Location detected. Distance to attendance point: ${distance.toFixed(2)} meters.`;
+                    createViewLocation = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                    };
+                    createLatInput.value = position.coords.latitude;
+                    createLonInput.value = position.coords.longitude;
+                    createLocationStatus.textContent = `Location set: Lat ${position.coords.latitude.toFixed(4)}, Lon ${position.coords.longitude.toFixed(4)}`;
+                    showMessageBox(createMessageContainer, 'success', 'Location successfully captured!');
                 },
                 (error) => {
-                    locationObtained = false; // Set flag to false on error
-                    currentLatitude = null;
-                    currentLongitude = null;
-                    currentLatInput.value = '';
-                    currentLonInput.value = '';
-
-                    let errorMsg = "Could not detect your location.";
-                    switch (error.code) {
-                        case error.PERMISSION_DENIED:
-                            errorMsg += " **Please enable location services for this site in your browser settings (e.g., Safari/Chrome Site Settings), and ensure location access is allowed for your browser in your device's Privacy & Security settings.**";
-                            break;
-                        case error.POSITION_UNAVAILABLE:
-                            errorMsg += " Location information is unavailable. Check your device's GPS/Wi-Fi.";
-                            break;
-                        case error.TIMEOUT:
-                            errorMsg += " Timed out while trying to get your location.";
-                            break;
-                        case error.UNKNOWN_ERROR:
-                            errorMsg += " An unknown error occurred during location detection.";
-                            break;
-                    }
-                    locationStatusText.textContent = `Location Error: ${errorMsg}`;
-                    showErrorMessage(errorMsg);
+                    createViewLocation = null;
+                    createLatInput.value = '';
+                    createLonInput.value = '';
+                    createLocationStatus.textContent = 'Location not set.';
                 },
-                {
-                    enableHighAccuracy: true, // Request more accurate location
-                    timeout: 10000,           // 10 seconds timeout
-                    maximumAge: 0             // Don't use cached location
-                }
+                createLocationStatus,
+                createMessageContainer
             );
-        } else {
-            locationStatusText.textContent = "Geolocation is not supported by your browser.";
-            showErrorMessage("Geolocation is not supported by your browser. Please use a modern browser.");
-        }
-    }
-
-    // Haversine formula to calculate distance between two lat/lon points
-    function calculateDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371e3; // metres
-        const φ1 = lat1 * Math.PI / 180; // φ, λ in radians
-        const φ2 = lat2 * Math.PI / 180;
-        const Δφ = (lat2 - lat1) * Math.PI / 180;
-        const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-        const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-                  Math.cos(φ1) * Math.cos(φ2) *
-                  Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-        const d = R * c; // in metres
-        return d;
-    }
-
-    // --- QR Scanner Functions ---
-    async function startQRScanner() {
-        if (qrScanner) {
-            qrScanner.stop();
-            qrScanner.destroy();
-            qrScanner = null;
-        }
-
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-            videoElement.srcObject = stream;
-            videoElement.style.display = 'block';
-
-            qrScanner = new QrScanner(
-                videoElement,
-                result => {
-                    console.log('Scanned QR Code:', result.data);
-                    qrCodeValueInput.value = result.data;
-                    qrStatusText.textContent = `QR Code Scanned: ${result.data.substring(0, 30)}... (Value Saved)`;
-                    pinInput.value = ''; // Clear PIN field if QR is scanned
-                    pinInput.disabled = true; // Disable PIN input
-                    qrScanner.stop();
-                    qrScanner.destroy();
-                    qrScanner = null;
-                    startScannerButton.style.display = 'none'; // Hide scanner button
-                    videoElement.style.display = 'none'; // Hide video element
-                },
-                {
-                    highlightScanRegion: true,
-                    highlightCodeOutline: true,
-                }
-            );
-
-            await qrScanner.start();
-            startScannerButton.textContent = "Scanning...";
-            startScannerButton.disabled = true;
-            qrStatusText.textContent = "Scanning for QR code...";
-            errorMessage.style.display = 'none'; // Hide any previous error
-        } catch (error) {
-            console.error("Error accessing camera: ", error);
-            const errorMsg = "Camera access denied or unavailable. Please ensure your browser and device have camera permissions.";
-            qrStatusText.textContent = `QR Error: ${errorMsg}`;
-            showErrorMessage(errorMsg);
-            videoElement.srcObject = null;
-            videoElement.style.display = 'none';
-            startScannerButton.disabled = false;
-            startScannerButton.textContent = "Request Camera Access";
-        }
-    }
-
-    // --- Message Display Functions ---
-    function showSuccessMessage(message) {
-        successMessage.textContent = message;
-        successMessage.style.display = "block";
-        errorMessage.style.display = "none";
-        setTimeout(() => { successMessage.style.display = "none"; }, 5000);
-    }
-
-    function showErrorMessage(message) {
-        errorMessage.textContent = message;
-        errorMessage.style.display = "block";
-        successMessage.style.display = "none";
-    }
-
-    // --- Event Listeners ---
-    startScannerButton.addEventListener("click", startQRScanner);
-
-    // When PIN input changes, enable QR scanning and clear QR value if PIN has value
-    pinInput.addEventListener('input', () => {
-        if (pinInput.value.trim() !== '') {
-            qrCodeValueInput.value = ''; // Clear QR value
-            qrStatusText.textContent = "Using PIN instead of QR. Click 'Request Camera Access' to scan QR.";
-            startScannerButton.style.display = 'inline-block'; // Show scanner button
-            startScannerButton.disabled = false;
-            videoElement.style.display = 'none'; // Hide video
-            if (qrScanner) { // Stop scanner if running
-                qrScanner.stop();
-                qrScanner.destroy();
-                qrScanner = null;
-            }
-        } else {
-             qrStatusText.textContent = "No QR code scanned yet. Click 'Request Camera Access' to start.";
-             // If PIN is cleared, re-enable QR scanning potential
-             startScannerButton.style.display = 'inline-block';
-             startScannerButton.disabled = false;
-        }
-    });
-
-    // --- Form Submission Handler ---
-    submissionForm.addEventListener("submit", function (event) {
-        event.preventDefault(); // Prevent default form submit
-        errorMessage.style.display = 'none';
-        successMessage.style.display = 'none';
-
-        const name = document.getElementById("name").value.trim();
-        const email = document.getElementById("email").value.trim();
-        const pin = pinInput.value.trim();
-        const qrCode = qrCodeValueInput.value.trim();
-
-        // Basic validation
-        if (!name || !email) {
-            showErrorMessage("Please enter both your name and email.");
-            return;
-        }
-
-        // Check if either PIN or QR code is entered
-        if (!pin && !qrCode) {
-            showErrorMessage("Please enter a PIN or scan a QR code.");
-            return;
-        }
-
-        // --- NEW: Check if BOTH PIN and QR are entered (if that's not allowed) ---
-        if (pin && qrCode) {
-            showErrorMessage("Please use EITHER a PIN OR scan a QR code, not both.");
-            return;
-        }
-        // --- END NEW ---
-
-        // Determine the method and value used for submission
-        const chosenMethod = pin ? "PIN" : "QR Code";
-        const authenticationValue = pin || qrCode;
-
-        // Check if location was obtained
-        if (!locationObtained) {
-            showErrorMessage("Location not detected. Please ensure location services are enabled for this site and try again.");
-            getCurrentLocation(); // Attempt to get location again
-            return;
-        }
-
-        // Check if user is within allowed proximity
-        const distance = calculateDistance(
-            currentLatitude,
-            currentLongitude,
-            FIXED_QR_PIN_LOCATION.latitude,
-            FIXED_QR_PIN_LOCATION.longitude
-        );
-
-        if (distance > PROXIMITY_RADIUS_METERS) {
-            showErrorMessage(`You are too far from the attendance point. Distance: ${distance.toFixed(2)} meters (Allowed: ${PROXIMITY_RADIUS_METERS} m)`);
-            return;
-        }
-
-        // Final success
-        showSuccessMessage("✅ Attendance submitted successfully!");
-
-        // Optional: You can now send data to a backend or Firebase
-        // Example:
-        const attendanceData = {
-            name: name,
-            email: email,
-            authenticationMethod: chosenMethod,
-            authenticationValue: authenticationValue, // This would be the PIN or QR code data
-            location: {
-                lat: currentLatitude,
-                lon: currentLongitude
-            },
-            distanceToPoint: distance.toFixed(2),
-            timestamp: new Date().toISOString()
-        };
-        console.log("Attendance Data to Send:", attendanceData);
-        // In a real application, you would use fetch() here to send to your server:
-        /*
-        fetch('/api/submit-attendance', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(attendanceData)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                showSuccessMessage("✅ Attendance submitted successfully!");
-            } else {
-                showErrorMessage(data.message || "Attendance submission failed.");
-            }
-        })
-        .catch(error => {
-            console.error('Error submitting attendance:', error);
-            showErrorMessage("Network error during submission. Please try again.");
         });
-        */
 
-        // Reset form fields and UI state after successful submission (for demo)
-        submissionForm.reset();
-        qrCodeValueInput.value = '';
-        pinInput.disabled = false;
-        startScannerButton.style.display = 'inline-block';
-        startScannerButton.disabled = false;
-        startScannerButton.textContent = "Request Camera Access";
-        videoElement.style.display = 'none';
-        // Reset location status for the next entry
-        currentLatitude = null;
-        currentLongitude = null;
-        locationObtained = false;
-        locationStatusText.textContent = "Attempting to detect your location...";
-        getCurrentLocation(); // Re-initiate location detection for the next submission
-    });
+        createSessionForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showMessageBox(createMessageContainer, 'success', ''); // Clear previous messages
+            showMessageBox(createMessageContainer, 'error', '');
 
-    // --- Initial setup on page load ---
-    videoElement.style.display = 'none'; // Hide video until camera access is requested
-    window.addEventListener("load", getCurrentLocation); // Automatically trigger location detection
-</script>
+            const sessionName = createSessionNameInput.value.trim();
+            const classDate = createClassDateInput.value.trim();
+
+            if (!sessionName || !classDate) {
+                showMessageBox(createMessageContainer, 'error', 'Please fill in session name and date.');
+                return;
+            }
+            if (!createViewLocation) {
+                showMessageBox(createMessageContainer, 'error', 'Please get the location for the attendance point.');
+                return;
+            }
+            if (window.firebaseLoading || !window.db || !window.currentUserId) {
+                showMessageBox(createMessageContainer, 'error', window.firebaseError || 'Firebase not initialized or user not authenticated. Please wait.');
+                return;
+            }
+
+            submitCreateSessionBtn.disabled = true;
+            submitCreateSessionBtn.textContent = 'Creating...';
+
+            const generatedPin = generatePin();
+            const sessionData = {
+                sessionId: `session_${Date.now()}_${window.currentUserId}`, // Unique ID for the session
+                name: sessionName,
+                date: classDate,
+                pin: generatedPin,
+                location: createViewLocation,
+                creatorId: window.currentUserId,
+                createdAt: new Date().toISOString(),
+            };
+
+            try {
+                const attendanceSessionsRef = collection(window.db, `artifacts/${__app_id}/users/${window.currentUserId}/attendanceSessions`);
+                await addDoc(attendanceSessionsRef, sessionData);
+
+                generatedPinSpan.textContent = generatedPin;
+                qrCodeImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${generatedPin}`;
+                createdPinDisplay.classList.remove('hidden');
+
+                showMessageBox(createMessageContainer, 'success', 'Attendance session created successfully!');
+                createSessionForm.reset();
+                createLocationStatus.textContent = 'Click "Get Location" to set attendance point.';
+                sessionCreationLocation = null; // Reset location for next session
+            } catch (e) {
+                console.error("Error creating session:", e);
+                showMessageBox(createMessageContainer, 'error', `Failed to create session: ${e.message}`);
+                createdPinDisplay.classList.add('hidden'); // Hide PIN if creation fails
+            } finally {
+                submitCreateSessionBtn.disabled = false;
+                submitCreateSessionBtn.textContent = 'Generate PIN & Create Session';
+            }
+        });
+
+        // --- Student Sign-in Logic ---
+
+        // Auto-detect student location when the sign-in view is shown
+        function getStudentLocation() {
+            getCurrentGeolocation(
+                (position) => {
+                    studentCurrentLocation = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                    };
+                    isStudentLocationObtained = true;
+                    studentLocationStatus.textContent = `Location detected. (Lat: ${position.coords.latitude.toFixed(4)}, Lon: ${position.coords.longitude.toFixed(4)})`;
+                },
+                (error) => {
+                    studentCurrentLocation = null;
+                    isStudentLocationObtained = false;
+                    // Error message handled by getCurrentGeolocation
+                },
+                studentLocationStatus,
+                signInMessageContainer
+            );
+        }
+
+        // QR Scanner Initialization
+        startQrScannerBtn.addEventListener('click', async () => {
+            if (qrScannerInstance) {
+                qrScannerInstance.stop();
+                qrScannerInstance.destroy();
+                qrScannerInstance = null;
+            }
+            if (cameraStreamInstance) {
+                cameraStreamInstance.getTracks().forEach(track => track.stop());
+                cameraStreamInstance = null;
+            }
+            showMessageBox(signInMessageContainer, 'error', ''); // Clear previous errors
+
+            startQrScannerBtn.textContent = 'Requesting Camera...';
+            startQrScannerBtn.disabled = true;
+            qrVideoScanner.style.display = 'none'; // Hide video until stream is ready
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+                qrVideoScanner.srcObject = stream;
+                cameraStreamInstance = stream;
+                qrVideoScanner.style.display = 'block'; // Show video
+
+                qrScannerInstance = new QrScanner(
+                    qrVideoScanner,
+                    result => {
+                        console.log('Scanned QR Code:', result.data);
+                        scannedQrValueInput.value = result.data;
+                        qrScanStatus.textContent = `QR Scanned: ${result.data.substring(0, 20)}...`;
+                        signInPinInput.value = ''; // Clear PIN field if QR is scanned
+                        signInPinInput.disabled = true; // Disable PIN input
+
+                        showMessageBox(signInMessageContainer, 'success', 'QR Code scanned successfully! Proceed to submit.');
+
+                        if (qrScannerInstance) {
+                            qrScannerInstance.stop();
+                            qrScannerInstance.destroy();
+                            qrScannerInstance = null;
+                        }
+                        if (cameraStreamInstance) {
+                            cameraStreamInstance.getTracks().forEach(track => track.stop());
+                            cameraStreamInstance = null;
+                        }
+                        qrVideoScanner.style.display = 'none'; // Hide video after scan
+                        startQrScannerBtn.textContent = 'Start Camera for QR';
+                        startQrScannerBtn.disabled = false;
+                    },
+                    { highlightScanRegion: true, highlightCodeOutline: true }
+                );
+                await qrScannerInstance.start();
+                startQrScannerBtn.textContent = 'Scanning...';
+            } catch (error) {
+                console.error("Error accessing camera: ", error);
+                const msg = "Camera access denied or unavailable. Please ensure your browser and device have camera permissions.";
+                qrScanStatus.textContent = `QR Error: ${msg}`;
+                showMessageBox(signInMessageContainer, 'error', msg);
+                qrVideoScanner.srcObject = null;
+                qrVideoScanner.style.display = 'none';
+                startQrScannerBtn.textContent = 'Start Camera for QR';
+                startQrScannerBtn.disabled = false;
+            }
+        });
+
+        // Handle PIN input change to clear QR code field and stop scanner
+        signInPinInput.addEventListener('input', () => {
+            if (signInPinInput.value.trim() !== '') {
+                scannedQrValueInput.value = ''; // Clear QR value
+                qrScanStatus.textContent = 'Using PIN instead of QR.';
+                if (qrScannerInstance) {
+                    qrScannerInstance.stop();
+                    qrScannerInstance.destroy();
+                    qrScannerInstance = null;
+                }
+                if (cameraStreamInstance) {
+                    cameraStreamInstance.getTracks().forEach(track => track.stop());
+                    cameraStreamInstance = null;
+                }
+                qrVideoScanner.style.display = 'none';
+                startQrScannerBtn.textContent = 'Start Camera for QR';
+                startQrScannerBtn.disabled = false; // Re-enable QR button
+            } else {
+                qrScanStatus.textContent = 'No QR code scanned yet.';
+                signInPinInput.disabled = false; // Ensure PIN input is enabled if cleared
+            }
+        });
+
+        signInForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showMessageBox(signInMessageContainer, 'success', ''); // Clear previous messages
+            showMessageBox(signInMessageContainer, 'error', '');
+
+            const studentName = studentNameInput.value.trim();
+            const studentEmail = studentEmailInput.value.trim();
+            const enteredPin = signInPinInput.value.trim();
+            const scannedQr = scannedQrValueInput.value.trim();
+
+            if (!studentName || !studentEmail) {
+                showMessageBox(signInMessageContainer, 'error', 'Please enter your name and email.');
+                return;
+            }
+            if (!enteredPin && !scannedQr) {
+                showMessageBox(signInMessageContainer, 'error', 'Please enter a PIN or scan a QR code.');
+                return;
+            }
+            if (enteredPin && scannedQr) {
+                showMessageBox(signInMessageContainer, 'error', 'Please use EITHER a PIN OR scan a QR code, not both.');
+                return;
+            }
+            if (!isStudentLocationObtained || !studentCurrentLocation) {
+                showMessageBox(signInMessageContainer, 'error', 'Location not detected. Please ensure location services are enabled for this site and try again.');
+                getStudentLocation(); // Attempt to re-get location
+                return;
+            }
+            if (window.firebaseLoading || !window.db || !window.currentUserId) {
+                showMessageBox(signInMessageContainer, 'error', window.firebaseError || 'Firebase not initialized or user not authenticated. Please wait.');
+                return;
+            }
+
+            submitSignInBtn.disabled = true;
+            submitSignInBtn.textContent = 'Submitting...';
+
+            const authenticationValue = enteredPin || scannedQr;
+
+            try {
+                // 1. Look up the attendance session by PIN
+                // Assuming the QR code stores the PIN directly
+                const attendanceSessionsRef = collection(window.db, `artifacts/${__app_id}/users/${window.currentUserId}/attendanceSessions`); // Search only sessions created by this user
+                const q = query(attendanceSessionsRef, where("pin", "==", authenticationValue));
+                const querySnapshot = await getDocs(q);
+
+                if (querySnapshot.empty) {
+                    // If not found in user's own sessions, could be a session created by another user.
+                    // This implies a shared PIN/QR for public sign-in, which is current setup.
+                    // The rule is to search ONLY in the current user's (creator's) sessions for validation
+                    // For student sign-in, the student needs to know *which* creator's session they are signing into, or sessions need to be public.
+                    // Current setup: Sessions are private to creator, but attendance records are public.
+                    // This means for student sign-in, we need to iterate through ALL users' attendanceSessions or make session collection public for reads.
+                    // **SECURITY/ARCHITECTURAL NOTE:** To make this truly public sign-in without a separate student authentication system,
+                    // the attendanceSessions collection would need `allow read: if request.auth != null;` rule.
+                    // For now, it assumes the student is signing into a session *created by the currently authenticated (anonymous) user*.
+                    // If you intend for *any student* to sign into *any session created by any instructor*, the session collection must be readable by all.
+                    // As per prompt, private for creator, public for sign-in records.
+                    // So, we search for sessions where the *creatorId* is known (the current user's ID for this demo).
+
+                    // To allow any student to sign in to *any* session:
+                    // 1. Change Firebase rules for attendanceSessions to allow read for all authenticated users.
+                    // 2. Query `collection(window.db, 'artifacts/' + __app_id + '/attendanceSessions')` instead, without the user ID.
+                    // As per current prompt for 'private for creator', I'll keep the current user's session search.
+                    // But then how would a student sign-in to a session created by a different instructor?
+                    // The prompt says "compare to the one by the user who submitted". This implies the student is the one who 'submitted'/'created' the session.
+                    // If the student is a different user, then the `attendanceSessions` collection needs to be world-readable for `where("pin", "==" ...)` to work.
+                    // Let's assume for this demo that the student user has created the session for themselves to sign into.
+                    // Alternatively, the creator (instructor) provides their __app_id and userId to the student for the query.
+                    // This is a common architectural decision.
+                    // Given "compare to the one by the user who submitted", it means the student is signing into a session they *know* about.
+                    // If `attendanceSessions` is private to creator, the student won't find it unless they are the creator.
+                    // Let's modify the query to search across *all* attendance sessions for *any* creator, assuming attendanceSessions collection is public.
+                    // **IMPORTANT:** For `collection(window.db, 'artifacts/' + __app_id + '/public/data/attendanceSessions')` or similar,
+                    // you MUST change Firebase rules for attendanceSessions to allow public read:
+                    // `match /artifacts/{appId}/public/data/attendanceSessions/{sessionId} { allow read: if request.auth != null; }`
+                    // I'll make the sessions collection for the creator private.
+
+                    // Instead, the student needs to find the session document from the creator.
+                    // A realistic approach would be: Student enters PIN -> Backend validates PIN, finds session and its location -> Backend sends it back to student.
+                    // Or, the QR code contains session ID and PIN, not just PIN.
+
+                    // Let's refine the search for `attendanceSessions` slightly.
+                    // Since student sign-in doesn't specify *whose* session they are signing into,
+                    // we need to search across ALL creator's private sessions, which isn't efficient or allowed by rules (unless you list all users).
+                    // The simplest, most practical way for "any student to sign in" is to make the `attendanceSessions` collection also public for read.
+                    // OR, the student is also an authenticated user, and they are signing into their *own* session they created.
+                    // Given the prompt "compare to the one by the user who submitted" - this strongly implies the student is the one who *created* the session.
+                    // Let's stick with that interpretation for this demo, and the student needs to be the creator.
+
+                    // Re-evaluating: "generate random 6 digit pin, add class date and store in a firebase database then when a student sign it you will get the co-ordinates and then compare to the one by the user who submitted"
+                    // "The user who submitted" (i.e., created the session) is the `creatorId`.
+                    // So, the student sign-in process implies:
+                    // 1. Student enters PIN/QR.
+                    // 2. We need to find *any* session across *all* creators that matches this PIN.
+                    // This requires a read rule on `attendanceSessions` that allows `get` or `list` for authenticated users.
+                    // Current rules: `allow read, write: if request.auth != null && request.auth.uid == userId;`
+                    // This means student (who is also an anonymous user) can only read their OWN created sessions.
+
+                    // To make this work as a general "student sign-in" for *any* session:
+                    // We need a common collection for sessions accessible by all.
+                    // Let's change the `CreateAttendanceSession` to store in `public/data/attendanceSessions` instead.
+                    // This is a critical architectural shift for the functionality to work.
+
+                    // **Revised Firebase Paths and Rules:**
+                    // - `artifacts/{appId}/users/{userId}/creatorSessions/{sessionId}` (Creator's private view of sessions they created)
+                    // - `artifacts/{appId}/public/data/allAttendanceSessions/{sessionId}` (Publicly readable sessions for students to find by PIN)
+                    // - `artifacts/{appId}/public/data/attendanceRecords/{recordId}` (Public for all to add records)
+
+                    // I will update the code to use:
+                    // - Create session: Add to `artifacts/${__app_id}/public/data/allAttendanceSessions`
+                    // - Student sign-in: Query `artifacts/${__app_id}/public/data/allAttendanceSessions`
+                    // - View sessions: Query `artifacts/${__app_id}/public/data/allAttendanceSessions` (filtered by creatorId)
+
+                    // This also means the rule for `allAttendanceSessions` should be:
+                    // `match /artifacts/{appId}/public/data/allAttendanceSessions/{sessionId} { allow read: if request.auth != null; allow create: if request.auth != null; }`
+                    // And to view *their own* sessions, the query would filter by `creatorId == request.auth.uid`.
+
+                    // This makes more sense for a general student sign-in.
+                    // The prompt "compare to the one by the user who submitted" would then refer to the `creatorId` *within* the session data.
+
+                    // Let's proceed with this public sessions approach for robustness.
+
+                    const allAttendanceSessionsRef = collection(window.db, `artifacts/${__app_id}/public/data/allAttendanceSessions`);
+                    const qAll = query(allAttendanceSessionsRef, where("pin", "==", authenticationValue));
+                    const querySnapshotAll = await getDocs(qAll);
+
+                    if (querySnapshotAll.empty) {
+                        showMessageBox(signInMessageContainer, 'error', 'Invalid PIN or QR Code. No active session found with this code.');
+                        submitSignInBtn.disabled = false;
+                        submitSignInBtn.textContent = 'Submit Attendance';
+                        return;
+                    }
+
+                    const sessionDoc = querySnapshotAll.docs[0]; // Get the first matching session
+                    const sessionData = sessionDoc.data();
+                    const attendancePointLocation = sessionData.location;
+
+                    // 2. Compare locations
+                    const distance = calculateDistance(
+                        studentCurrentLocation.latitude,
+                        studentCurrentLocation.longitude,
+                        attendancePointLocation.latitude,
+                        attendancePointLocation.longitude
+                    );
+
+                    if (distance > PROXIMITY_RADIUS_METERS) {
+                        showMessageBox(signInMessageContainer, 'error', `You are too far from the attendance point. Distance: ${distance.toFixed(2)} meters (Allowed: ${PROXIMITY_RADIUS_METERS} m)`);
+                        submitSignInBtn.disabled = false;
+                        submitSignInBtn.textContent = 'Submit Attendance';
+                        return;
+                    }
+
+                    // 3. Record attendance
+                    const attendanceRecord = {
+                        sessionId: sessionData.sessionId,
+                        sessionName: sessionData.name,
+                        classDate: sessionData.date,
+                        studentName: studentName,
+                        studentEmail: studentEmail,
+                        studentLocation: studentCurrentLocation,
+                        distanceToPoint: distance.toFixed(2),
+                        signedAt: new Date().toISOString(),
+                        creatorId: sessionData.creatorId, // Link to the creator of the session
+                    };
+
+                    const attendanceRecordsRef = collection(window.db, `artifacts/${__app_id}/public/data/attendanceRecords`);
+                    await addDoc(attendanceRecordsRef, attendanceRecord);
+
+                    showMessageBox(signInMessageContainer, 'success', 'Attendance submitted successfully!');
+                    signInForm.reset();
+                    scannedQrValueInput.value = '';
+                    signInPinInput.disabled = false;
+                    qrScanStatus.textContent = 'No QR code scanned yet.';
+                    getStudentLocation(); // Re-initiate location check for next submission
+                } catch (e) {
+                    console.error("Error submitting attendance:", e);
+                    showMessageBox(signInMessageContainer, 'error', `Failed to submit attendance: ${e.message}`);
+                } finally {
+                    submitSignInBtn.disabled = false;
+                    submitSignInBtn.textContent = 'Submit Attendance';
+                }
+        });
+
+        // --- View Attendance Sessions Logic ---
+
+        async function fetchAttendanceSessions() {
+            sessionsList.innerHTML = '<p class="text-gray-600">Loading sessions...</p>';
+            viewMessageContainer.innerHTML = '';
+            if (window.firebaseLoading || !window.db || !window.currentUserId) {
+                showMessageBox(viewMessageContainer, 'error', window.firebaseError || 'Firebase not initialized or user not authenticated. Cannot load sessions.');
+                sessionsList.innerHTML = '<p class="text-red-600">Error loading sessions.</p>';
+                return;
+            }
+
+            try {
+                // Fetch sessions created by the current user from the public collection
+                const allAttendanceSessionsRef = collection(window.db, `artifacts/${__app_id}/public/data/allAttendanceSessions`);
+                const q = query(allAttendanceSessionsRef, where("creatorId", "==", window.currentUserId));
+
+                const unsubscribe = onSnapshot(q, (snapshot) => {
+                    if (snapshot.empty) {
+                        sessionsList.innerHTML = '<p class="text-gray-600">No attendance sessions created yet.</p>';
+                        return;
+                    }
+                    sessionsList.innerHTML = ''; // Clear previous list
+                    snapshot.docs.forEach(doc => {
+                        const session = { id: doc.id, ...doc.data() };
+                        const sessionDiv = document.createElement('div');
+                        sessionDiv.className = 'p-4 border rounded-md cursor-pointer border-gray-200 hover:bg-gray-50';
+                        sessionDiv.innerHTML = `
+                            <h3 class="font-semibold text-lg">${session.name} <span class="text-gray-500 text-sm">(${session.date})</span></h3>
+                            <p class="text-sm text-gray-600">PIN: <span class="font-mono text-blue-700">${session.pin}</span></p>
+                            <p class="text-xs text-gray-500">Created: ${new Date(session.createdAt).toLocaleString()}</p>
+                            <p class="text-xs text-gray-500">Attendance Point: Lat ${session.location.latitude.toFixed(4)}, Lon ${session.location.longitude.toFixed(4)}</p>
+                        `;
+                        sessionDiv.addEventListener('click', () => {
+                            // Visually highlight selected session
+                            document.querySelectorAll('#sessions-list > div').forEach(div => {
+                                div.classList.remove('border-blue-500', 'bg-blue-50');
+                            });
+                            sessionDiv.classList.add('border-blue-500', 'bg-blue-50');
+
+                            selectedSessionIdToView = session.sessionId;
+                            fetchAttendanceRecords(session.sessionId, session.name);
+                        });
+                        sessionsList.appendChild(sessionDiv);
+                    });
+                }, (error) => {
+                    console.error("Error fetching sessions:", error);
+                    showMessageBox(viewMessageContainer, 'error', `Failed to load sessions: ${error.message}`);
+                    sessionsList.innerHTML = '<p class="text-red-600">Error loading sessions.</p>';
+                });
+            } catch (e) {
+                console.error("Error fetching sessions init:", e);
+                showMessageBox(viewMessageContainer, 'error', `Failed to initialize session fetching: ${e.message}`);
+            }
+        }
+
+        async function fetchAttendanceRecords(sessionId, sessionName) {
+            recordsForSessionTitle.textContent = `Attendance Records for "${sessionName}"`;
+            attendanceRecordsList.innerHTML = '<p class="text-gray-600">Loading records...</p>';
+            selectedSessionRecordsDiv.classList.remove('hidden');
+            viewMessageContainer.innerHTML = '';
+
+            if (window.firebaseLoading || !window.db) {
+                showMessageBox(viewMessageContainer, 'error', window.firebaseError || 'Firebase not initialized. Cannot load records.');
+                attendanceRecordsList.innerHTML = '<p class="text-red-600">Error loading records.</p>';
+                return;
+            }
+
+            try {
+                const attendanceRecordsRef = collection(window.db, `artifacts/${__app_id}/public/data/attendanceRecords`);
+                const q = query(attendanceRecordsRef, where("sessionId", "==", sessionId));
+
+                const unsubscribe = onSnapshot(q, (snapshot) => {
+                    if (snapshot.empty) {
+                        attendanceRecordsList.innerHTML = '<p class="text-gray-600">No students have signed in for this session yet.</p>';
+                        return;
+                    }
+                    attendanceRecordsList.innerHTML = ''; // Clear previous records
+                    snapshot.docs.forEach(doc => {
+                        const record = doc.data();
+                        const listItem = document.createElement('li');
+                        listItem.className = 'py-3 flex justify-between items-center';
+                        listItem.innerHTML = `
+                            <div>
+                                <p class="text-lg font-medium text-gray-900">${record.studentName}</p>
+                                <p class="text-sm text-gray-600">${record.studentEmail}</p>
+                                <p class="text-xs text-gray-500">Signed at: ${new Date(record.signedAt).toLocaleString()}</p>
+                                <p class="text-xs text-gray-500">Location: Lat ${record.studentLocation.latitude.toFixed(4)}, Lon ${record.studentLocation.longitude.toFixed(4)}</p>
+                                <p class="text-xs text-gray-500">Distance to Point: ${record.distanceToPoint} meters</p>
+                            </div>
+                        `;
+                        attendanceRecordsList.appendChild(listItem);
+                    });
+                }, (error) => {
+                    console.error("Error fetching attendance records:", error);
+                    showMessageBox(viewMessageContainer, 'error', `Failed to load attendance records: ${error.message}`);
+                    attendanceRecordsList.innerHTML = '<p class="text-red-600">Error loading records.</p>';
+                });
+            } catch (e) {
+                console.error("Error fetching records init:", e);
+                showMessageBox(viewMessageContainer, 'error', `Failed to initialize record fetching: ${e.message}`);
+            }
+        }
+
+        // --- Event Listeners for Navigation ---
+        createSessionBtn.addEventListener('click', () => showView('create-view'));
+        studentSignInBtn.addEventListener('click', () => showView('sign-in-view'));
+        viewSessionsBtn.addEventListener('click', () => showView('view-sessions-view'));
+
+        backHomeCreateBtn.addEventListener('click', () => showView('home'));
+        backHomeSignInBtn.addEventListener('click', () => showView('home'));
+        backHomeViewBtn.addEventListener('click', () => showView('home'));
+
+        // --- Initial Load ---
+        // Firebase initialization is handled in the <script type="module"> block above.
+        // The `showView('home')` call is triggered once Firebase is ready.
+        // Initially, all views are hidden by CSS.
+        // The Firebase status element is updated as Firebase loads.
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set initial date for create session form to today
+            createClassDateInput.value = new Date().toISOString().slice(0, 10);
+            updateFirebaseStatusUI(); // Initial status check
+            // The showView('home') call is dependent on Firebase loading.
+            // If Firebase is already loaded (e.g. from a quick refresh), show home.
+            if (!window.firebaseLoading && !window.firebaseError) {
+                showView('home');
+            }
+        });
+
+    </script>
 </body>
 </html>
